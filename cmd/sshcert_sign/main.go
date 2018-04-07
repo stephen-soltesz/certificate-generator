@@ -24,6 +24,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"io/ioutil"
@@ -33,7 +34,7 @@ import (
 	"strings"
 
 	"github.com/gorilla/mux"
-	"github.com/kr/pretty"
+	// "github.com/kr/pretty"
 	"github.com/mikesmitty/edkey"
 	"golang.org/x/crypto/ed25519"
 	"golang.org/x/crypto/ssh"
@@ -198,17 +199,100 @@ func addRoute(router *mux.Router, method, pattern string, handler http.Handler) 
 	router.Methods(method).Path(pattern).Handler(handler)
 }
 
-func main() {
-	// ssh-keygen -s measurement-lab-ssh-ca \
-	// HOST CERTIFICATE (-h)
-	//   -n 192.168.0.109
-	//   -V +52w
-	//   -I ubuntu-192-168-0-109
-	// ssh_host_rsa_key.pub
+func sign() {
+	/*
+		// Server certificate.
+		c := &ssh.Certificate{
+			Nonce:           []byte{},
+			Key:             nil,
+			Serial:          0x0,
+			CertType:        ssh.HostCert,
+			KeyId:           "ubuntu-192-168-0-109",
+			ValidPrincipals: []string{
+				"192.168.0.109",
+			},
+			ValidAfter:      0x5ac57894,
+			ValidBefore:     0x5ca55b08,
+		}
 
-	b, err := ioutil.ReadFile("measurement-lab-ssh-ca.pub")
+		// User certificate.
+		c := &ssh.Certificate{
+			Nonce:           []byte{},
+			Key:             nil,
+			Serial:          0x0,
+			CertType:        ssh.UserCert,
+			KeyId:           "soltesz-user",
+			ValidPrincipals: {"soltesz", "root"},
+			ValidAfter:      0x5ac58758,
+			ValidBefore:     0x5ca569b2,
+			Permissions: ssh.Permissions{
+				Extensions: map[string]string{
+					"permit-X11-forwarding": "",
+					"permit-agent-forwarding": "",
+					"permit-port-forwarding": "",
+					"permit-pty": "",
+					"permit-user-rc": "",
+				},
+			},
+		}
+	*/
+
+}
+
+func serverCert(id string, principals []string) *ssh.Certificate {
+	return &ssh.Certificate{
+		Nonce:           []byte{},
+		Key:             nil,
+		Serial:          0x0,
+		CertType:        ssh.HostCert,
+		KeyId:           id,
+		ValidPrincipals: principals,
+		ValidAfter:      0x5ac57894,
+		ValidBefore:     0x5ca55b08,
+	}
+	return nil
+}
+
+func parsePrivateKey(file string) ssh.Signer {
+	b, err := ioutil.ReadFile(file)
 	if err != nil {
-		log.Println("read ca pub")
+		log.Println("read key: ", file)
+		log.Fatal(err)
+	}
+	signer, err := ssh.ParsePrivateKey(b)
+	if err != nil {
+		log.Println("parse ca private key")
+		log.Fatal(err)
+	}
+	return signer
+}
+
+func parsePublicKey(file string) ssh.PublicKey {
+	asciiBytes, err := ioutil.ReadFile(file)
+	if err != nil {
+		log.Println("read rsa key pub: ", file)
+		log.Fatal(err)
+	}
+
+	fields := strings.SplitN(string(asciiBytes), " ", 3)
+	rawBytes, err := base64.StdEncoding.DecodeString(fields[1])
+	if err != nil {
+		fmt.Println("Decode fail: ", fields[1])
+		log.Fatal(err)
+	}
+
+	pubkey, err := ssh.ParsePublicKey(rawBytes)
+	if err != nil {
+		log.Println("parse rsa key pub")
+		log.Fatal(err)
+	}
+	return pubkey
+}
+
+func parseCert(file string) *ssh.Certificate {
+	b, err := ioutil.ReadFile(file)
+	if err != nil {
+		log.Println("read ca pub: ", file)
 		log.Fatal(err)
 	}
 	fmt.Println(string(b))
@@ -225,52 +309,45 @@ func main() {
 		log.Println("parse ca key 1")
 		log.Fatal(err)
 	}
-	//c := pubkey.(*ssh.Certificate)
-	pretty.Println(string(b))
-	pretty.Println(pubkey)
+	c := pubkey.(*ssh.Certificate)
+	return c
+}
 
-	b, err = ioutil.ReadFile("measurement-lab-ssh-ca")
-	if err != nil {
-		log.Println("read ca key")
-		log.Fatal(err)
-	}
-	signer, err := ssh.ParsePrivateKey(b)
-	if err != nil {
-		log.Println("parse ca private key")
-		log.Fatal(err)
-	}
-	pretty.Println("signer")
-	pretty.Println(signer)
-
-	// b, err = ioutil.ReadFile("ssh_host_rsa_key.pub")
-	b, err = ioutil.ReadFile("id_rsa.pub")
-	if err != nil {
-		log.Println("read rsa key pub")
-		log.Fatal(err)
-	}
+func prettyPrint(v interface{}) {
+	b, _ := json.MarshalIndent(v, "", "  ")
 	fmt.Println(string(b))
-	f = strings.SplitN(string(b), " ", 3)
+}
 
-	b, err = base64.StdEncoding.DecodeString(f[1])
-	if err != nil {
-		fmt.Println("Decode fail: ", f[1])
-		log.Fatal(err)
-	}
+func main() {
+	// ssh-keygen -s measurement-lab-ssh-ca \
+	// HOST CERTIFICATE (-h)
+	//   -n 192.168.0.109
+	//   -V +52w
+	//   -I ubuntu-192-168-0-109
+	// ssh_host_rsa_key.pub
 
-	pubkey, err = ssh.ParsePublicKey(b)
-	if err != nil {
-		log.Println("parse rsa key pub")
-		log.Fatal(err)
-	}
-	pretty.Println(pubkey)
-	/*
-		marker, hosts, pubkey, comment, rest, err := ssh.ParseKnownHosts(b)
-		pretty.Print(pubkey)
-		pretty.Print(marker)
-		pretty.Print(hosts)
-		pretty.Print(comment)
-		pretty.Print(rest)
-	*/
+	// parse private
+	// parse public
+	// create cert with public key
+	// cert.SignCert(rand.Reader, signer)
+
+	// b, err := ioutil.ReadFile("measurement-lab-ssh-ca.pub")
+	// cert := parseCert("id_rsa-cert.pub")
+	// prettyPrint(cert)
+
+	signer := parsePrivateKey("measurement-lab-ssh-ca")
+	prettyPrint(signer)
+
+	pubkey := parsePublicKey("ssh_host_rsa_key.pub")
+	prettyPrint(pubkey)
+
+	cert := serverCert("ubuntu-192-168-0-109", []string{"192.168.0.109"})
+	cert.Key = pubkey
+	cert.SignCert(rand.Reader, signer)
+	fmt.Println("Type: ", cert.Type())
+	b := cert.Marshal()
+	s := base64.StdEncoding.EncodeToString(b)
+	fmt.Println(s)
 
 	/*
 		c := ssh.Certificate{
