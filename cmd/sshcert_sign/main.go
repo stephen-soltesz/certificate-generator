@@ -18,6 +18,7 @@
 package main
 
 import (
+	"archive/tar"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -32,6 +33,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/gorilla/mux"
 	// "github.com/kr/pretty"
@@ -250,7 +252,28 @@ func serverCert(id string, principals []string) *ssh.Certificate {
 		ValidAfter:      0x5ac57894,
 		ValidBefore:     0x5ca55b08,
 	}
-	return nil
+}
+
+func userCert(id string, principals []string) *ssh.Certificate {
+	return &ssh.Certificate{
+		Nonce:           []byte{},
+		Key:             nil,
+		Serial:          0x0,
+		CertType:        ssh.UserCert,
+		KeyId:           id,
+		ValidPrincipals: principals,
+		ValidAfter:      0x5ac58758,
+		ValidBefore:     0x5ca569b2,
+		Permissions: ssh.Permissions{
+			Extensions: map[string]string{
+				"permit-X11-forwarding":   "",
+				"permit-agent-forwarding": "",
+				"permit-port-forwarding":  "",
+				"permit-pty":              "",
+				"permit-user-rc":          "",
+			},
+		},
+	}
 }
 
 func parsePrivateKey(file string) ssh.Signer {
@@ -265,6 +288,11 @@ func parsePrivateKey(file string) ssh.Signer {
 		log.Fatal(err)
 	}
 	return signer
+}
+
+func asciiPublicKey(signer ssh.Signer) string {
+	p := signer.PublicKey()
+	return p.Type() + " " + base64.StdEncoding.EncodeToString(p.Marshal())
 }
 
 func parsePublicKey(file string) ssh.PublicKey {
@@ -318,6 +346,24 @@ func prettyPrint(v interface{}) {
 	fmt.Println(string(b))
 }
 
+func writeFile(w *tar.Writer, name string, data []byte) error {
+	header := &tar.Header{
+		Typeflag: tar.TypeReg,
+		Name:     name,
+		Size:     int64(len(data)),
+		Mode:     06440,
+		ModTime:  time.Now(),
+	}
+	if err := w.WriteHeader(header); err != nil {
+		return err
+	}
+	_, err := w.Write(data)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func main() {
 	// ssh-keygen -s measurement-lab-ssh-ca \
 	// HOST CERTIFICATE (-h)
@@ -338,30 +384,31 @@ func main() {
 	signer := parsePrivateKey("measurement-lab-ssh-ca")
 	prettyPrint(signer)
 
-	pubkey := parsePublicKey("ssh_host_rsa_key.pub")
+	pubkey := parsePublicKey("id_rsa.pub")
 	prettyPrint(pubkey)
 
-	cert := serverCert("ubuntu-192-168-0-109", []string{"192.168.0.109"})
+	// cert := serverCert("ubuntu-192-168-0-109", []string{"192.168.0.109"})
+	cert := userCert("user-soltesz", []string{"soltesz", "root"})
 	cert.Key = pubkey
 	cert.SignCert(rand.Reader, signer)
-	fmt.Println("Type: ", cert.Type())
-	b := cert.Marshal()
-	s := base64.StdEncoding.EncodeToString(b)
-	fmt.Println(s)
 
-	/*
-		c := ssh.Certificate{
-			Nonce           []byte
-			Key             PublicKey
-			Serial          uint64
-			CertType        uint32
-			KeyId           string
-			ValidPrincipals []string
-			ValidAfter      uint64
-			ValidBefore     uint64
-			ssh.Permissions{
-			}
-		}
-	*/
+	rawCAPubBytes := asciiPublicKey(signer)
+	rawPubCert := cert.Type() + " " + base64.StdEncoding.EncodeToString(cert.Marshal())
 
+	f, err := os.OpenFile("out.tar", os.O_RDWR|os.O_CREATE, 0644)
+	if err != nil {
+		log.Fatal(err)
+	}
+	w := tar.NewWriter(f)
+
+	// create a new dir/file header
+	err = writeFile(w, "measurement-lab-ssh-ca.pub2", []byte(rawCAPubBytes))
+	err = writeFile(w, "id_rsa-cert.pub2", []byte(rawPubCert))
+
+	if err != nil {
+		log.Fatal(err)
+	}
+	w.Write([]byte(rawCAPubBytes))
+	w.Close()
+	f.Close()
 }
